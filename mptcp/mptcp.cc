@@ -312,7 +312,7 @@ double MptcpAgent::get_increment(int subflow_id_)
 	int p = -1;
 	double s = 0, ans = 1e100, res = 0;
 	MptcpSubflow *pflow = 0;
-	for (int i = 0; i < subflow_.size(); ++i) {
+	for (uint i = 0; i < subflow_.size(); ++i) {
 		if (subflow_[i]->id_ == subflow_id_) {
 			p = i;
 		}
@@ -323,7 +323,7 @@ double MptcpAgent::get_increment(int subflow_id_)
 		cerr << "Fatal: can't find subflow whose id is " << subflow_id_ << endl;
 		abort();
 	}
-	for (int i = p; i < subflow_.size(); ++i) {
+	for (uint i = p; i < subflow_.size(); ++i) {
 		pflow = subflow_[i]->tcp_;
 		s += pflow->cwnd_ / pflow->t_srtt_;
 		res = pflow->cwnd_ / sqr(pflow->t_srtt_) / sqr(s);
@@ -452,11 +452,6 @@ void MptcpSubflow::send_much(int force, int reason, int maxburst) {
 	int npackets = 0;
 
 	while ( t_seqno_ - last_ack_ - 1 < win ) {
-		if (core_->get_receive_window() <= 0) {
-                        core->opportunistic_retransmission(subflow_id_);
-                        continue;
-		}
-
 		output(t_seqno_, reason);
 		t_seqno_ ++;
 		npackets++;
@@ -612,20 +607,3 @@ void MptcpSubflow::recv(Packet *pkt, Handler*) {
   	Packet::free(pkt);
 }
 
-void MptcpSubflow::oppo_retransmission()
-{
-        int seqno = -1;
-        int reason = TCP_REASON_OPPO_RETRANSMISSION;
-
-        Packet* p = allocpkt();
-	hdr_tcp *tcph = hdr_tcp::access(p);
-	int databytes = hdr_cmn::access(p)->size();
-	tcph->ts() = Scheduler::instance().clock();
-
-	tcph->ts_echo() = ts_peer_;
-	tcph->reason() = reason;
-	tcph->last_rtt() = int(int(t_rtt_)*tcp_tick_*1000);
-	tcph->mptcp_seqno() = core_->get_last_ack() + 1
-
-	for ()
-}

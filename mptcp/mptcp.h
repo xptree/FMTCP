@@ -56,8 +56,7 @@ public:
 	int get_last_ack() {return last_ack_;}
 	int get_curseq() {return curseq_; }
 	int get_t_seqno() {return t_seqno_; }
-	int get_receive_window()
-		{ return wnd_ - (get_t_seqno() - get_last_ack()) + 1; } //@Qiu
+
 	double get_increment(int subflow_id_); //@Qiu
 
 	void totrace(std::string msg);
@@ -109,7 +108,7 @@ public:
 	virtual void send_much(int force, int reason, int maxburst = 0);
 	virtual void sendone(int reason);
 	void triple_ack();		//triple ack, treated as time out
-	void oppo_retransmission();
+
 
 	void mptcp_setdata(int id, MptcpAgent *core) {subflow_id_ = id; core_ = core; } //allow mptcp agent to set some data
 
