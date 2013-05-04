@@ -59,6 +59,8 @@ public:
 	int get_receive_window()
 		{ return wnd_ - (get_t_seqno() - get_last_ack()) + 1; } //@Qiu
 	double get_increment(int subflow_id_); //@Qiu
+	void add_record(Packet* p, int subflow_id_);//@Qiu
+	int get_origin_subflow_id(int seqno);
 
 	void totrace(std::string msg);
 	void totest(std::string msg);
@@ -83,6 +85,7 @@ protected:
 	int last_ack_; //the (mptcp) sequence number of the last acked packet
 
 	bool buffer_[send_buffer_size];
+	vector<int> record[send_buffer_size];
 
 	int remaining_bytes_;
 
@@ -107,9 +110,8 @@ public:
 	virtual void recv(Packet*, Handler*);
 	virtual void timeout(int tno);
 	virtual void send_much(int force, int reason, int maxburst = 0);
-	virtual void sendone(int reason);
 	void triple_ack();		//triple ack, treated as time out
-	void oppo_retransmission();
+	bool oppo_retransmission();
 
 	void mptcp_setdata(int id, MptcpAgent *core) {subflow_id_ = id; core_ = core; } //allow mptcp agent to set some data
 
@@ -134,6 +136,7 @@ protected:
 	int sent_[send_buffer_size];  //store mptcp seqnos
 	int cnt_dupack_;		//the number of dup acks
 	int highest_seqno_;
+	double last_penalty_time;
 
 	virtual void output(int seqno, int reason = 0);
 

@@ -263,6 +263,7 @@ void MptcpAgent::update_ack(int mptcp_seqno, int subflow_id) {
   if (mptcp_seqno <= last_ack_ || mptcp_seqno - last_ack_ > send_buffer_size) return;
 
   buffer_[mptcp_seqno % send_buffer_size] = true;
+        record[mptcp_seqno % send_buffer_size].clear();
 
   /*int last_offset = (last_ack_+1) % send_buffer_size;
   while (buffer_[last_offset]) {
@@ -312,7 +313,7 @@ double MptcpAgent::get_increment(int subflow_id_)
 	int p = -1;
 	double s = 0, ans = 1e100, res = 0;
 	MptcpSubflow *pflow = 0;
-	for (int i = 0; i < subflow_.size(); ++i) {
+	for (uint i = 0; i < subflow_.size(); ++i) {
 		if (subflow_[i]->id_ == subflow_id_) {
 			p = i;
 		}
@@ -323,7 +324,7 @@ double MptcpAgent::get_increment(int subflow_id_)
 		cerr << "Fatal: can't find subflow whose id is " << subflow_id_ << endl;
 		abort();
 	}
-	for (int i = p; i < subflow_.size(); ++i) {
+	for (uint i = p; i < subflow_.size(); ++i) {
 		pflow = subflow_[i]->tcp_;
 		s += pflow->cwnd_ / pflow->t_srtt_;
 		res = pflow->cwnd_ / sqr(pflow->t_srtt_) / sqr(s);
@@ -377,6 +378,22 @@ void MptcpAgent::send_much(int maxburst) {
   }
 }
 
+void MptcpAgent::add_record(Packet *p,int subflow_id_)
+{
+	hdr_tcp *tcph = hdr_tcp::access(p);
+	int mptcp_seqno_ = tcph->mptcp_seqno();
+	record[mptcp_seqno_ % send_buffer_size].push_back(subflow_id_);
+}
+
+int MptcpAgent::get_origin_subflow_id(int seqno)
+{
+        if (record[seqno % send_buffer_size].empty()) {
+                cerr << "record " << seqno << " is empty!";
+                abort();
+        }
+        return record[seqno % send_buffer_size][0];
+}
+
 MptcpSubflow::MptcpSubflow() : TcpAgent(), subflow_id_(-1), core_(NULL), highest_seqno_(-1) {
   syn_ = 0;
   frto_enabled_ = 0;
@@ -393,6 +410,7 @@ MptcpSubflow::MptcpSubflow() : TcpAgent(), subflow_id_(-1), core_(NULL), highest
   last_ack_ = -1;
 
   timeout_state = false;
+  last_penalty_time = Scheduler::instance().clock();
 
 }
 
@@ -443,7 +461,6 @@ void MptcpSubflow::triple_ack() {
   output(last_ack_ + 1, 1);
 
   reset_rtx_timer(1, 0);
-
 }
 
 void MptcpSubflow::send_much(int force, int reason, int maxburst) {
@@ -453,28 +470,23 @@ void MptcpSubflow::send_much(int force, int reason, int maxburst) {
 
 	while ( t_seqno_ - last_ack_ - 1 < win ) {
 		if (core_->get_receive_window() <= 0) {
-                        core->opportunistic_retransmission(subflow_id_);
-                        continue;
+                        bool flag = oppo_retransmission();
+                        if (flag) {
+                                ++t_seqno_;
+                                ++npackets;
+
+                        }
+		} else {
+                        output(t_seqno_, reason);
+                        t_seqno_ ++;
+                        npackets++;
 		}
-
-		output(t_seqno_, reason);
-		t_seqno_ ++;
-		npackets++;
-
 		win = window();
 
 		if (maxburst && npackets == maxburst)
 			break;
 	}
 
-}
-
-void MptcpSubflow::sendone(int reason)
-{
-	int win = window();
-	if (t_seqno_ - last_ack_ - 1 < win) {
-		output(t_seqno_, reason);
-	}
 }
 
 //output a packet whose seqno equals (seqno)arg[0]
@@ -508,15 +520,19 @@ void MptcpSubflow::output(int seqno, int reason) {
 	    return;
 	  }
 	} else {
-	  timeout_state = false;
-	  tcph->mptcp_seqno() = core_->get_mptcp_seqno();
-	  if(tcph->mptcp_seqno() < 0){
-	    t_seqno_ --;
-	    cerr<<"buf out of bound!"<<endl;
-	    return;
-	  }
-	  sent_[seqno % send_buffer_size] = tcph->mptcp_seqno();
-	  if (seqno > highest_seqno_) highest_seqno_ = seqno;
+                timeout_state = false;
+                if (reason == TCP_REASON_OPPO_RETRANSMISSION) {
+                        tcph->mptcp_seqno() = core_->get_last_ack() + 1;
+                } else {
+                        tcph->mptcp_seqno() = core_->get_mptcp_seqno();
+                }
+                if(tcph->mptcp_seqno() < 0){
+                        t_seqno_ --;
+                        cerr<<"buf out of bound!"<<endl;
+                        return;
+                }
+                sent_[seqno % send_buffer_size] = tcph->mptcp_seqno();
+                if (seqno > highest_seqno_) highest_seqno_ = seqno;
 	}
 
 	memset(tmp,0,sizeof(tmp));
@@ -524,14 +540,22 @@ void MptcpSubflow::output(int seqno, int reason) {
 	//totrace(tmp);
 
         if (seqno - last_ack_ - 1 == 0) {
-          set_rtx_timer();
+                set_rtx_timer();
         }
 
         ++ndatapack_;
         ndatabytes_ += databytes;
 
+        core_->add_record(p, subflow_id_);
 	send(p, 0);
-
+	if (core_->get_receive_window() <= 0) {
+                double current_time = Scheduler::instance().clock();
+                if (current_time - last_penalty_time > t_rtt_) {
+                        if (cwnd_ < 1) cwnd_ = 1;
+                        slowdown(CLOSE_SSTHRESH_HALF | CLOSE_CWND_HALF);
+                        last_penalty_time = Scheduler::instance().clock();
+                }
+	}
 }
 
 void MptcpSubflow::recv(Packet *pkt, Handler*) {
@@ -583,7 +607,7 @@ void MptcpSubflow::recv(Packet *pkt, Handler*) {
 			Packet::free(pkt);
 			return;
 		}
-		sendone(0);//?@Qiu
+		send_much(0, 0, 1);//?@Qiu
 		cwnd_ += core_->get_increment(subflow_id_);
 	}
 
@@ -612,20 +636,12 @@ void MptcpSubflow::recv(Packet *pkt, Handler*) {
   	Packet::free(pkt);
 }
 
-void MptcpSubflow::oppo_retransmission()
+bool MptcpSubflow::oppo_retransmission()
 {
-        int seqno = -1;
+        if (core_->get_origin_subflow_id(core_->get_last_ack() + 1) == this->subflow_id_) return 0;
+        if (t_seqno_ - last_ack_ - 1 >= window()) return 0;
+
         int reason = TCP_REASON_OPPO_RETRANSMISSION;
-
-        Packet* p = allocpkt();
-	hdr_tcp *tcph = hdr_tcp::access(p);
-	int databytes = hdr_cmn::access(p)->size();
-	tcph->ts() = Scheduler::instance().clock();
-
-	tcph->ts_echo() = ts_peer_;
-	tcph->reason() = reason;
-	tcph->last_rtt() = int(int(t_rtt_)*tcp_tick_*1000);
-	tcph->mptcp_seqno() = core_->get_last_ack() + 1
-
-	for ()
+        output(t_seqno_, reason);
+        return 1;
 }
