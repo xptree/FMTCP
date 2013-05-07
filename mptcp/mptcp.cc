@@ -394,6 +394,19 @@ int MptcpAgent::get_origin_subflow_id(int seqno)
         return record[seqno % send_buffer_size][0];
 }
 
+void MptcpAgent::penalize_subflow()
+{
+        int subflow_id_ = get_origin_subflow_id(get_last_ack() + 1);
+        MptcpSubflow* sf_agent = 0;
+        for (uint i = 0; i < subflow_.size(); ++i)
+        if (subflow_[i]->id_ == subflow_id_){
+                sf_agent = subflow_[i]->tcp_;
+                break;
+        }
+        assert(sf_agent != 0);
+        sf_agent->get_penalty();
+}
+
 MptcpSubflow::MptcpSubflow() : TcpAgent(), subflow_id_(-1), core_(NULL), highest_seqno_(-1) {
   syn_ = 0;
   frto_enabled_ = 0;
@@ -470,12 +483,14 @@ void MptcpSubflow::send_much(int force, int reason, int maxburst) {
 
 	while ( t_seqno_ - last_ack_ - 1 < win ) {
 		if (core_->get_receive_window() <= 0) {
+                        if (core_->get_origin_subflow_id(core_->get_last_ack() + 1) == subflow_id_)
+                                continue;
                         bool flag = oppo_retransmission();
                         if (flag) {
                                 ++t_seqno_;
                                 ++npackets;
-
                         }
+                        core_->penalize_subflow();
 		} else {
                         output(t_seqno_, reason);
                         t_seqno_ ++;
@@ -548,14 +563,6 @@ void MptcpSubflow::output(int seqno, int reason) {
 
         core_->add_record(p, subflow_id_);
 	send(p, 0);
-	if (core_->get_receive_window() <= 0) {
-                double current_time = Scheduler::instance().clock();
-                if (current_time - last_penalty_time > t_rtt_) {
-                        if (cwnd_ < 1) cwnd_ = 1;
-                        slowdown(CLOSE_SSTHRESH_HALF | CLOSE_CWND_HALF);
-                        last_penalty_time = Scheduler::instance().clock();
-                }
-	}
 }
 
 void MptcpSubflow::recv(Packet *pkt, Handler*) {
@@ -638,10 +645,18 @@ void MptcpSubflow::recv(Packet *pkt, Handler*) {
 
 bool MptcpSubflow::oppo_retransmission()
 {
-        if (core_->get_origin_subflow_id(core_->get_last_ack() + 1) == this->subflow_id_) return 0;
         if (t_seqno_ - last_ack_ - 1 >= window()) return 0;
-
         int reason = TCP_REASON_OPPO_RETRANSMISSION;
         output(t_seqno_, reason);
         return 1;
+}
+
+void MptcpSubflow::get_penalty()
+{
+        double current_time = Scheduler::instance().clock();
+        if (current_time - last_penalty_time > t_rtt_) {
+                if (cwnd_ < 1) cwnd_ = 1;
+                slowdown(CLOSE_SSTHRESH_HALF | CLOSE_CWND_HALF);
+                last_penalty_time = Scheduler::instance().clock();
+        }
 }
