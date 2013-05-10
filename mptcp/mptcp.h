@@ -102,8 +102,9 @@ protected:
 
 //The subflow sending agent
 class MptcpSubflow : public TcpAgent {
-	friend class MptcpAgent;
-	friend bool cmp(const Subflow*, const Subflow*);
+	friend class MptcpAgent; //@Qiu
+	friend bool cmp(const Subflow*, const Subflow*); //@Qiu
+	friend bool id_cmp(const Subflow*, const Subflow*); //@Qiu
 public:
 	MptcpSubflow();
 	virtual ~MptcpSubflow();
@@ -111,6 +112,7 @@ public:
 	virtual void recv(Packet*, Handler*);
 	virtual void timeout(int tno);
 	virtual void send_much(int force, int reason, int maxburst = 0);
+        void opencwnd();
 	void triple_ack();		//triple ack, treated as time out
 	void get_penalty();     //@Qiu
 	bool oppo_retransmission();

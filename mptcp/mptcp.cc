@@ -307,6 +307,11 @@ bool cmp(const Subflow* A, const Subflow* B)
 	return A->tcp_->cwnd_ * sqr(B->tcp_->t_srtt_) < B->tcp_->cwnd_ * sqr(B->tcp_->t_srtt_);
 }
 
+bool id_cmp(const Subflow* A, const Subflow* B)
+{
+        return A->id_ < B->id_;
+}
+
 double MptcpAgent::get_increment(int subflow_id_)
 {
 	sort(subflow_.begin(), subflow_.end(), cmp);
@@ -330,6 +335,7 @@ double MptcpAgent::get_increment(int subflow_id_)
 		res = pflow->cwnd_ / sqr(pflow->t_srtt_) / sqr(s);
 		ans = MIN(res, ans);
 	}
+	sort(subflow_.begin(), subflow_.end(), id_cmp);
 	return ans;
 }
 
@@ -476,6 +482,24 @@ void MptcpSubflow::triple_ack() {
   reset_rtx_timer(1, 0);
 }
 
+void MptcpSubflow::opencwnd()
+{
+        double increment;
+	if (cwnd_ < ssthresh_) {
+		/* slow-start (exponential) */
+		cwnd_ += 1;
+	} else {
+	        increment = core_->get_increment(subflow_id_);
+	        if ((last_cwnd_action_ == 0 ||
+			  last_cwnd_action_ == CWND_ACTION_TIMEOUT)
+			  && max_ssthresh_ > 0) {
+				increment = limited_slow_start(cwnd_,
+				  max_ssthresh_, increment);
+			}
+                cwnd_ += increment;
+	}
+}
+
 void MptcpSubflow::send_much(int force, int reason, int maxburst) {
 
 	int win = window();
@@ -615,7 +639,7 @@ void MptcpSubflow::recv(Packet *pkt, Handler*) {
 			return;
 		}
 		send_much(0, 0, 1);//?@Qiu
-		cwnd_ += core_->get_increment(subflow_id_);
+//		cwnd_ += core_->get_increment(subflow_id_);
 	}
 
   	while (last_ack_ < tcph->seqno()) {//@Qiu 累计确认
