@@ -32,6 +32,7 @@ public:
 void MptcpAgent::delay_bind_init_all(){
 	delay_bind_init_one("window_");
 	delay_bind_init_one("block_size_");
+	delay_bind_init_one("mptcp_strategy_");
 	Agent::delay_bind_init_all();
 	//reset();
 }
@@ -39,6 +40,7 @@ void MptcpAgent::delay_bind_init_all(){
 int MptcpAgent::delay_bind_dispatch(const char *varName, const char *localName, TclObject *tracer){
 	if (delay_bind(varName, localName, "window_", &wnd_, tracer)) return TCL_OK;
 	if (delay_bind(varName, localName, "block_size_", &block_packets, tracer)) return TCL_OK;
+	if (delay_bind(varName, localName, "mptcp_strategy_", &strategy, tracer)) return TCL_OK;
 	return Agent::delay_bind_dispatch(varName, localName, tracer);
 }
 
@@ -506,7 +508,7 @@ void MptcpSubflow::send_much(int force, int reason, int maxburst) {
 	int npackets = 0;
 
 	while ( t_seqno_ - last_ack_ - 1 < win ) {
-		if (core_->get_receive_window() <= 0) {
+		if (core_->get_receive_window() <= 0 && core_->get_strategy() == 1) {
                         if (core_->get_origin_subflow_id(core_->get_last_ack() + 1) == subflow_id_)
                                 continue;
                         bool flag = oppo_retransmission();

@@ -61,6 +61,7 @@ public:
 	double get_increment(int subflow_id_); //@Qiu
 	void add_record(Packet* p, int subflow_id_);//@Qiu
 	int get_origin_subflow_id(int seqno);//@Qiu
+	int get_strategy() {return strategy;}
 	void penalize_subflow();//@Qiu
 
 	void totrace(std::string msg);
@@ -98,6 +99,7 @@ protected:
 	Subflow* find_subflow(int daddr);
 	bool check_routable(int sid, int addr, int port); //check whether we can send packet to (addr,port) using subflow sid
 	void add_destination(int addr, int port);
+        int strategy; // whether to use the strategy oppo and penalty
 };
 
 //The subflow sending agent
